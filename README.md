@@ -8,8 +8,12 @@ This repository provides several pre-configured versions of the script for these
 - p7zip
 - debootstrap
 - qemu-user-static
+- box86 (optional)
+- box64 (optional)
 
 The script is primarily designed to be run on Debian/Ubuntu systems, but you can run debootstrap via docker as well.
+
+**If put into /usr/local/bin/, help for debchroot:**
 
 ```bash
 type /usr/local/bin/debchroot --info    to display the chroot parameters
