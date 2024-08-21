@@ -8,8 +8,12 @@ This repository provides several pre-configured versions of the script for these
 - p7zip
 - debootstrap
 - qemu-user-static
-- box86 (optional)
-- box64 (optional)
+- box86 (optional) [compile instructions](https://github.com/ptitSeb/box86/blob/master/docs/COMPILE.md)
+- box64 (optional) [compile instructions](https://github.com/ptitSeb/box64/blob/main/docs/COMPILE.md)
+
+```bash
+sudo apt-get install zsh p7zip qemu-user-static
+```
 
 The script is primarily designed to be run on Debian/Ubuntu systems, but you can run debootstrap via docker as well.
 
@@ -39,4 +43,5 @@ PS to speed up chroot, you may want to add this line to your crontab
 * * * * *  renice -n -20 $(ps aux | grep qemu-binfmt | grep -v grep | awk '{print $2}') &> /dev/null
 ```
 
-Buy me a coffee if you can! I worked hard on this one.
+Buy me a coffee if you like the script!  
+[paypal.me](https://www.paypal.com/paypalme/IBOLOTOV?country.x=CZ&locale.x=cs_CZ)
