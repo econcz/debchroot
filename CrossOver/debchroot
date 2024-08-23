@@ -1,0 +1,360 @@
+#!/bin/zsh
+
+# ============================================================================ #
+# ==== Version 1.1.4  31mar2024  ============================================= #
+# ==== (c) IB                    ============================================= #
+# ============================================================================ #
+
+# check if the user is /root/, or exit with error ============================ #
+####
+[[ $EUID -ne 0                                                             ]] &&
+{ echo "This script must be run as root!"                            ; exit 1; }
+# an extra line to even the total number
+
+# display /help/ ============================================================= #
+####
+[[ $@ == "--help"                                                          ]] &&
+{ echo "type $(readlink -f "$0") --info    to display the chroot parameters" ;
+  echo "type $(readlink -f "$0") --install to install the chroot environment";
+  echo "type $(readlink -f "$0") --setup   to set up the chroot environment" ;
+  echo "type $(readlink -f "$0") --setup+  same + add symlinks in /usr/lib/" ;
+  echo "type $(readlink -f "$0") --umount  to unmount the chroot environment";
+  echo "type $(readlink -f "$0") --umount+ same + remove the added symlinks" ;
+  echo "type $(readlink -f "$0") --backup  to backup unsynced folders/files" ;
+  echo "type $(readlink -f "$0") --restore to restore the chroot environment";
+  echo "type $(readlink -f "$0") <cmd>     to run <cmd> under chroot"        ;
+  echo ""                                                                    ;
+  echo "NB type DISPLAY=:1 CHROOT_USER=root ARCH=i386 SUITE=jessie"          \
+       "APTSOURCE=http://archive.debian.org/debian/ $(readlink -f "$0")"     \
+       "<flag|cmd> to change default parameters"                             ;
+  echo ""                                                                    ;
+  echo "NB type host <nohup> <cmd> under [chroot] to run a command in [host]";
+  echo "   to avoid password, please add these lines to /etc/ssh/sshd_config";
+  echo ""                                                                    ;
+  echo "AuthorizedKeysCommand /bin/sh -c \"cat %h/.ssh/authorized_keys.d/*\"";
+  echo "AuthorizedKeysCommandUser root"                                      ;
+  echo ""                                                                    ;
+  echo "PS to speed up chroot, you may want to add this line to your crontab";
+  echo ""                                                                    ;
+  echo "* * * * *  renice -n -20 \$(ps aux | grep qemu-binfmt |"             \
+       "grep -v grep | awk '{print \$2}') &> /dev/null"              ; exit 0; }
+
+# ============================================================================ #
+# ==== Configuration ========================================================= #
+# ============================================================================ #
+
+# /general configuration/ (general variables) -------------------------------- #
+####
+display_________="$DISPLAY$([[ $DISPLAY == "" ]] && echo :0)"
+user____________="$CHROOT_USER$([[ $CHROOT_USER == "" ]] && echo $SUDO_USER)"
+user_home_______="$(eval echo ~$user____________)"
+user_shell______="/bin/bash"
+user_folders____=("/" "/.config/")                     `# folder/* to mount`
+skip_names______=("*conda*" "R" "go")                  `# skip on mount`
+chroot_arch_____="$ARCH$([[ $ARCH == "" ]] && echo amd64)"
+chroot_suite____="$(curl -s http://deb.debian.org/debian/     2> /dev/null  |  \
+                    grep -E 's/.*D.*[0-9]' | tail -1                        |  \
+                    sed  -E -e 's/(^.+\s+|[</]{2}.+)//g')"
+chroot_suite____="$SUITE$([[ $SUITE == "" ]] && echo $chroot_suite____)"
+chroot_aptsource="http://deb.debian.org/debian/"
+chroot_aptsource="$APTSOURCE$([[ $APTSOURCE == "" ]] && echo $chroot_aptsource)"
+path_backup_file="~"
+path_backup_file="${path_backup_file}backup_chroot_${chroot_arch_____}.7z"
+path_chroot_____="/var/chroot_${chroot_arch_____}"     `# no trailing slash!`
+path_local_sw___="/opt"                                `# no trailing slash!`
+                                        # <!-- concrete apps --------------- -->
+path_crossover__="$((ls -d ~/*crossover*.deb) 2> /dev/null)"
+                                        # <!-- /concrete apps--------------- -->
+
+# /user-defined functions/ --------------------------------------------------- #
+####
+chroot_backup() {
+    # unmount the chroot filesystem(s), user folder(s), and media
+    chroot_umount 0   "$1"                                    2> /dev/null
+    # backup the chroot
+    echo "Chroot backup initiated. Compressing folders/files..."
+    rm  -rf            "${path_backup_file}"
+    cd                 "${path_chroot_____}"
+    tar czf  -         *                                                       |
+    7z  a    -si       "${path_backup_file}"               -p 2> /dev/null    ||
+    { echo "There was a problem with the backup file '${path_backup_file}'!" ;
+      exit 1                                                                 ; }
+    # finish
+    echo "Backup is complete! Setting up chroot..."
+    chroot_setup  1 1 "$1"
+}
+chroot_install() {
+    # unmount the chroot filesystem(s), user folder(s), and media
+    chroot_umount 0   "$1"                                    2> /dev/null
+    # install the chroot
+    echo "Script requirements:"
+    echo -e "    debootstrap (e.g., via a docker image)"
+    echo -e "    qemu-user-static"
+    echo -e "    p7zip\n"
+    echo "This script will"
+    echo -e "    create a new Debian ${chroot_suite____} ${chroot_arch_____}"  \
+            "chroot in ${path_chroot_____} from source ${chroot_aptsource}\n"
+    read "ans?$(echo $'\n')Do you wish to continue? [y/n]$(echo $'\n: ')"
+    [[ $(echo ${ans} | tr -d '[:space:]') != [Yy]*                         ]] &&
+    exit 0
+    echo "Chroot installation initiated. Running debootstrap..."
+    rm  -rf            "${path_chroot_____}"
+    mkdir       -p     "${path_chroot_____}"
+    debootstrap --arch "${chroot_arch_____}" "${chroot_suite____}"             \
+                       "${path_chroot_____}" "${chroot_aptsource}"            ||
+    {
+        echo "Debootstrap failed, please make sure it is executable from root!"
+        exit 0
+    }
+    # finish
+    echo "Installation is complete! Setting up chroot..."
+    bash        -c     "chroot_setup 1 0; exit 0"             2> /dev/null
+    chroot             "${path_chroot_____}"                                   \
+    bash        -c     "apt -y install locales acl sudo openssh-server         \
+                                       python3-pip python3-wheel python3-venv  \
+                                       pipx curl wget p7zip                  ; \
+                        dpkg-reconfigure locales                             ; \
+                        useradd -m -d '${user_home_______}'                    \
+                                       ${user____________}    2> /dev/null   ; \
+                        passwd         ${user____________}                   ; \
+                        for i in tty sudo adm cdrom audio video plugdev        \
+                                     input netdev dialout                ; do  \
+                        usermod -a -G \$i ${user____________}            ; done"
+    chroot_setup  1 1 "$1"
+}
+chroot_restore() {
+    # unmount the chroot filesystem(s), user folder(s), and media
+    chroot_umount 0   "$1"                                    2> /dev/null
+    # restore the chroot
+    echo "This script will"
+    echo -e "    delete the folder ${path_chroot_____} from disk (if present)" \
+            "and replace it with the contents of '${path_backup_file}'\n"
+    read "ans?$(echo $'\n')Do you wish to continue? [y/n]$(echo $'\n: ')"
+    [[ $(echo ${ans} | tr -d '[:space:]') != [Yy]*                         ]] &&
+    exit 0
+    echo "Chroot restore initiated. Decompressing folders/files..."
+    rm  -rf            "${path_chroot_____}"                                   \
+                  /tmp/"$(basename "${path_backup_file}" | sed -e 's/.7z//')"
+    mkdir    -p        "${path_chroot_____}"           `# no 7z x -so for *.7z`
+    7z  x              "${path_backup_file}" -O/tmp/          2> /dev/null
+    tar xzf       /tmp/"$(basename "${path_backup_file}" | sed -e 's/.7z//')"  \
+             -C        "${path_chroot_____}"/                 2> /dev/null    &&
+    rm  -f        /tmp/"$(basename "${path_backup_file}" | sed -e 's/.7z//')" ||
+    { echo "There was a problem with the backup file '${path_backup_file}'!" ;
+      exit 1                                                                 ; }
+    setfacl -Rm u:"${user____________}":rwx          "${path_chroot_____}"
+    # finish
+    echo "Restoration is complete! Setting up chroot..."
+    chroot_setup  1 1 "$1"
+}
+chroot_setup()   {
+    # $1 == 0    do not mount the chroot filesystem(s) on start
+    # $2 == 0    do not print message on finish
+    # unmount the chroot filesystem(s), user folder(s), and media
+    [[ $1 -eq 1                                                            ]] &&
+    chroot_umount 0   "$3"                                    2> /dev/null
+    # mount the chroot filesystem(s)
+    [[ $1 -eq 1                                                            ]] &&
+    mount -t      proc proc "${path_chroot_____}"/proc                        &&
+    mount -t      sysfs sys "${path_chroot_____}"/sys                         &&
+    mount -o bind /run      "${path_chroot_____}"/run                         &&
+    mount -o bind /dev      "${path_chroot_____}"/dev                         &&
+    mount -o bind /dev/pts  "${path_chroot_____}"/dev/pts                     &&
+    chmod         0777      "${path_chroot_____}"/tmp
+    # mount user folder(s)
+    [[ $1 -eq 1                                                               &&
+       $( ls "${user_home_______}"/)                                 != "" ]] &&
+    for d in "${user_folders____[@]}"; do for i in "${user_home_______}$d"*/; do
+    for s in "${skip_names______[@]}"                                       ; do
+    eval     "[[ \"$(basename "$i")\" == $s ]] && continue 2"             ; done
+    rm    -rf          "${path_chroot_____}$i"
+    chroot   "${path_chroot_____}" su "${user____________}" -c                 \
+             "mkdir -p \"$i\""
+    mount --rbind "$i" "${path_chroot_____}$i"                      ; done; done
+    # mount media (to chroot)
+    [[ $1 -eq 1                                                               &&
+       $((ls /media/"${user____________}"/) 2> /dev/null)            != "" ]] &&
+    for i in /media/"${user____________}"/*                               ; do
+    chroot   "${path_chroot_____}" mkdir   -p                              "$i"
+    chroot   "${path_chroot_____}" setfacl -Rm u:"${user____________}":rwx "$i"
+    mount    "$(mount | grep "$i" | awk '{print $1}')"                         \
+             "${path_chroot_____}/$i"                                     ; done
+    # reload the systemd configuration
+    [[ $1 -eq 1                                                            ]] &&
+    systemctl daemon-reload                                   &> /dev/null
+    # share sudoers, DNS servers, and Xauthority
+    cp    -R /etc/sudoers*                                                     \
+             "${path_chroot_____}"/etc/                       &> /dev/null
+    cp    -R /etc/host*                                                        \
+             "${path_chroot_____}"/etc/                       &> /dev/null
+    cp    -R /etc/resolv.conf                                                  \
+             "${path_chroot_____}"/etc/                       &> /dev/null
+    cp    -R /run/resolvconf/resolv.conf                                       \
+             "${path_chroot_____}"/etc/                       &> /dev/null
+    ln    -f "${user_home_______}"/.Xauthority                                 \
+             "${path_chroot_____}${user_home_______}"/        &> /dev/null
+                                        # <!-- run apps without chroot ----- -->
+    # symlinks to architecture-specific libraries in [host]
+    [[ $4 != ""                                                            ]] &&
+    cd       "${path_chroot_____}"  && for i in usr/lib/*-linux-gnu       ; do
+    mkdir -p "/$i/"                  ; for j in "$i"/*                    ; do
+    [[ !  -e "/$j"                                                         ]] &&
+    ln    -s "${path_chroot_____}/$j" "/$j"     2> /dev/null        ; done; done
+    [[ $4 != ""                                                            ]] &&
+    ln    -s "${path_chroot_____}"/lib/*-linux-gnu/ld-*.so.2                   \
+             /lib/ld-linux.so.2                 2> /dev/null
+                                        # <!-- /run apps without chroot ---- -->
+    # create the [chroot]/usr/local/bin/host to run commands in [host] over SSH
+    mkdir -p "${user_home_______}"/.ssh/authorized_keys.d/                     \
+             "${path_chroot_____}${user_home_______}"/.ssh/
+    cd       "${user_home_______}"/.ssh/
+    su       "${user____________}" -c "(rm -rf /tmp/id_rsa*)  &> /dev/null   ; \
+             ssh-keygen -q -P \"\" -t rsa -b 2048 -f /tmp/id_rsa"
+    mv       /tmp/id_rsa.pub authorized_keys.d/"chroot_${chroot_arch_____}"
+    mv       /tmp/id_rsa "${path_chroot_____}${user_home_______}"/.ssh/
+    chown -R      "${user____________}":"${user____________}"                  \
+                  "${user_home_______}"/.ssh/authorized_keys.d/
+    chmod -R 0600 "${user_home_______}"/.ssh/authorized_keys.d/                \
+                  "${path_chroot_____}${user_home_______}"/.ssh/id*
+    echo     "#!/bin/bash"                                                     |
+    tee      "${path_chroot_____}"/usr/local/bin/host         &> /dev/null    &&
+    echo     "#!/bin/bash"                                                     |
+    tee      "${path_chroot_____}"/usr/local/bin/host         &> /dev/null    &&
+    echo     "ssh -i \"${user_home_______}/.ssh/id_rsa\" -oAddressFamily=inet" \
+             "-oStrictHostKeyChecking=no ${user____________}@localhost"        \
+             "\"\$@\""                                                         |
+    tee   -a      "${path_chroot_____}"/u*/l*/b*/host         &> /dev/null    &&
+    chmod    0755 "${path_chroot_____}"/u*/l*/b*/host
+                                        # <!-- concrete apps --------------- -->
+    # CrossOver (/<local_sw>/cxoffice/)
+    [[ $chroot_arch_____                                        == "amd64" ]] &&
+    [[ !  -e "${path_chroot_____}${path_local_sw___}"/cxoffice/               &&
+          -e "${path_crossover__}"                                         ]] &&
+    zsh   -c "chroot \"${path_chroot_____}\" dpkg -i \"${path_crossover__}\";  \
+              exit 0"                                         2> /dev/null    &&
+    chroot   "${path_chroot_____}" dpkg    --add-architecture i386            &&
+    chroot   "${path_chroot_____}" bash    -c "apt update; apt -y install -f" &&
+    chroot   "${path_chroot_____}" /opt/cxoffice/bin/cxfix --auto
+                                        # <!-- /concrete apps -------------- -->
+    # symlinks to [chroot]/<local_sw>/ in [host]/<local_sw>/
+    [[ $( ls "${path_chroot_____}${path_local_sw___}"/)              != "" ]] &&
+    cd       "${path_chroot_____}"  && for i in "${path_local_sw___:1}"/* ; do
+    [[ !  -e "/$i"                                                         ]] &&
+    ln    -s "${path_chroot_____}/$i" "/$i"                               ; done
+                                        # <!-- /concrete apps -------------- -->
+    # symlinks to [chroot]/<local_sw>/ in [host]/<local_sw>/
+    [[ $( ls "${path_chroot_____}${path_local_sw___}"/)              != "" ]] &&
+    cd       "${path_chroot_____}"  && for i in "${path_local_sw___:1}"/* ; do
+    [[ !  -e "/$i"                                                         ]] &&
+    ln    -s "${path_chroot_____}/$i" "/$i"                               ; done
+    # finish
+    [[ $2 -eq 1                                                            ]] &&
+    echo "Chroot setup is complete! Type $3 <cmd> to use."
+}
+chroot_umount()  {
+    # $1 == 0    do not print message on finish
+    # unmount media (from chroot)
+    [[ $(mount | grep -E "/media"                                           |  \
+                 grep    "${path_chroot_____}")                      != "" ]] &&
+    umount -lf "${path_chroot_____}"/media/*/*                &> /dev/null    &&
+    (rmdir     "${path_chroot_____}"/media/*/*)               &> /dev/null
+    sleep 2
+    # unmount user folder(s)
+    [[ $(mount | grep -E "${user_home_______}"                              |  \
+                 grep    "${path_chroot_____}")                      != "" ]] &&
+    for d in "${user_folders____[@]}"; do for i in "${user_home_______}$d"*/; do
+    umount -lf "${path_chroot_____}$i"                        &> /dev/null     \
+                                                                    ; done; done
+    sleep 2
+    # share sudoers, DNS servers, and Xauthority
+    su       "${user____________}" -c "xhost -local:root"     &> /dev/null
+    # unmount the chroot filesystem(s)
+    [[ $(mount | grep -E "/(proc|sys|run|dev)"                              |  \
+                 grep    "${path_chroot_____}")                      != "" ]] &&
+    for i in "/proc" "/sys" "/run" "/dev/pts" "/dev"                      ; do
+    umount -lf "${path_chroot_____}$i"                        &> /dev/null; done
+    sleep 2
+    # reload the systemd configuration
+    systemctl daemon-reload                                   &> /dev/null
+    [[ $(mount | grep "${path_chroot_____}")                         != "" ]] &&
+    {
+        echo "Unmounting failed, please unmount the filesystem(s) manually!"
+        exit 0
+    }
+                                        # <!-- run apps without chroot ----- -->
+    # symlinks to architecture-specific libraries in [host]
+    [[ $3 != ""                                                            ]] &&
+    cd       "${path_chroot_____}"  && for i in usr/lib/*-linux-gnu       ; do
+                                       for j in "$i"/*                    ; do
+    [[ $((ls -ld "/$j") 2> /dev/null | grep  "${path_chroot_____}")  != "" ]] &&
+    rm       -f  "/$j"         ; done; rmdir "/$i"            &> /dev/null; done
+    [[ $3 != ""                                                            ]] &&
+    rm       -f  /lib/ld-linux.so.2
+                                        # <!-- /run apps without chroot ---- -->
+    # clear the [chroot]/tmp/ folder
+    (rm -rf  "${path_chroot_____}"/tmp/* )                    &> /dev/null
+    (rm -rf  "${path_chroot_____}"/tmp/.*)                    &> /dev/null
+    chroot   "${path_chroot_____}"                                             \
+    setfacl  -Rm u::rwx /tmp/
+                                        # <!-- concrete apps --------------- -->
+    # termination of chroot-based proccesess
+    ps aux | grep -E "${path_chroot_____}" | grep -v grep                      |
+    awk '{print $2}' | xargs -I {} kill -9 {}                 &> /dev/null
+                                        # <!-- /concrete apps -------------- -->
+    # symlinks to [chroot]/<local_sw>/ in [host]/<local_sw>/
+    [[ $( ls "${path_chroot_____}${path_local_sw___}"/)              != "" ]] &&
+    cd       "${path_chroot_____}"  && for i in "${path_local_sw___:1}"/* ; do
+    [[ $((ls -ld "/$i") 2> /dev/null | grep  "${path_chroot_____}")  != "" ]] &&
+    rm       -f  "/$i"                                                    ; done
+    # finish
+    [[ $1 -eq 1                                                            ]] &&
+    echo "Chroot unmount is complete! Type $2 --setup to reverse."
+}
+
+# ============================================================================ #
+# ==== Chroot ================================================================ #
+# ============================================================================ #
+
+# perform /chroot_*/ operations or run a command ----------------------------- #
+####
+# chroot operations ####################
+[[ $@ == "--backup"                                                        ]] &&
+{ chroot_backup                                                      ; exit 0; }
+[[ $@ == "--info"                                                          ]] &&
+{ echo -e "Location: ${path_chroot_____}/\nSystem:   Debian"                   \
+          "${chroot_suite____} ${chroot_arch_____}"                            \
+          "${chroot_aptsource}\nUser:     ${user____________}"                 \
+          "${user_home_______}\nDisplay:  ${display_________}"       ; exit 0; }
+[[ $@ == "--install"                                                       ]] &&
+{ chroot_install     "$(readlink -f "$0")"                           ; exit 0; }
+[[ $@ == "--restore"                                                       ]] &&
+{ chroot_restore     "$(readlink -f "$0")"                           ; exit 0; }
+[[ $@ == "--setup"*                                                        ]] &&
+{ chroot_setup   1 1 "$(readlink -f "$0")" "$(echo $@                       |  \
+                                            sed -E -e 's/[^+]//g')"  ; exit 0; }
+[[ $@ == "--umount"*                                                       ]] &&
+{ chroot_umount  1   "$(readlink -f "$0")" "$(echo $@                       |  \
+                                            sed -E -e 's/[^+]//g')"  ; exit 0; }
+# hardlink Unix-domain sockets #########
+socket="$((ls -d /tmp/.X*-unix/X${display_________:1}) 2> /dev/null)"
+mkdir  -p "${path_chroot_____}$(dirname "${socket}")"         &> /dev/null
+ln     -f "$socket" "${path_chroot_____}${socket}"            &> /dev/null
+chroot "${path_chroot_____}" setfacl -Rm u:"${user____________}":rwx /tmp/
+# enable QEMU bin formats ##############
+for i in $(eval ls $(which qemu-x86_64-static | sed -e 's/x86_64/*/')          |
+sed -E -e 's/(^[^q]+|-[^-]+$)//g')                                        ; do
+update-binfmts --enable $i                                    &> /dev/null; done
+# chroot command #######################
+[[ $@ == ""                                                                ]] &&
+runcmd="${user_shell______}"                                                  ||
+runcmd="DISPLAY=${display_________}"
+chroot "${path_chroot_____}" su -l "${user____________}" -P -c "${runcmd} $@"
+
+# ============================================================================ #
+# ==== Finish ================================================================ #
+# ============================================================================ #
+
+exit 0
+
+####
+####
