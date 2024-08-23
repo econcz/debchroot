@@ -1,21 +1,21 @@
 # debchroot
-With this **highly configurable bash script** you can enable your 32-bit/64-bit Raspberry Pi, Orange Pi, Arduino UNO, ASUS Tinker Board S R2.0, etc., as well as Android/Harmony OS-based devices (root access required) with ARM architecture support 32-bit/64-bit x86_64 applications, such as every version of **AMPL**, **GAMS**, **Stata**, **TeXmacs**, or **Wine/CrossOver** software with **a single command**. The script creates a minimal Debian/Ubuntu-based chroot in /var/chroot_\<arch\> mirroring your user's home folder and bind-mounting all directories matching '~/\*', together with the '~/.config/\*' (this allows to run the same app, e.g., Calibre, on different architectures with shared configuration and can be turned off if needed). Technically, you can create multiple chroots, each with a different architecture (so far, one for each architecture), an open filesystem (in contrast to **docker**), and a shared X11 server, including a /var/chroot_arm64 on an x86_64 machine (or /var/chroot_armhf on an x86 one). The apps in chroot are then run with the help of **QEMU** (AMPL, GAMS, Stata, TeXmacs, etc.) and **box86/box64** (Wine/CrossOver) binary format configurations. The **crossover** command allows both binfmt configurations to co-exist, i.e., you can launch your Stata (TeXmacs) and EndNote (or a Steam game) on your device simultaneously with one short command/single click!
+With this **highly configurable bash script** you can enable your 32-bit/64-bit Raspberry Pi, Orange Pi, Arduino UNO, ASUS Tinker Board S R2.0, etc., as well as Android/Harmony OS-based devices (root access required) with ARM architecture support 32-bit/64-bit x86_64 applications, such as every version of **AMPL**, **GAMS**, **Stata**, **TeXmacs**, or **Wine/CrossOver** software with **a single command**. The script creates a minimal Debian/Ubuntu-based chroot in /var/chroot_\<arch\> mirroring your user's home folder and bind-mounting all directories matching '\~/\*', together with the '~/.config/\*' (this allows to run the same app, e.g., Calibre, on different architectures with shared configuration and can be turned off if needed). Technically, you can create multiple chroots, each with a different architecture (so far, one for each architecture), an open filesystem (in contrast to **docker**), and a shared X11 server, including a /var/chroot_arm64 on an x86_64 machine (or /var/chroot_armhf on an x86 one). The apps in chroot are then run with the help of **QEMU** (AMPL, GAMS, Stata, TeXmacs, etc.) and **box86/box64** (Wine/CrossOver) binary format configurations. The **crossover** command allows both binfmt configurations to co-exist, i.e., you can launch your Stata (TeXmacs) and EndNote (or a Steam game) on your device simultaneously with one short command/single click!
 
-This repository provides several pre-configured versions of the script for these five cases: a) AMPL, b) GAMS, a) Stata, b) TeXmacs, and c) Wine/Crossover. The AMPL, GAMS, and Stata-specific versions of the script search for files matching '\*ampl\*gz', '\*gams\*exe', '\*stata\*gz\*', and '*crossover*.deb' (string case irrelevant) in the user's home directory. If you are interested in using the script, put the script file into **/usr/local/bin/** or **~/.local/bin**, an appropriately-named installer (if required) into **~**, and run in your terminal with the help of **sudo**:
+This repository provides several pre-configured versions of the script for these five cases: a) AMPL, b) GAMS, a) Stata, b) TeXmacs, and c) Wine/Crossover. The AMPL, GAMS, and Stata-specific versions of the script search for files matching '\*ampl\*gz', '\*gams\*exe', '\*stata\*gz\*', and '\*crossover\*.deb' (string case irrelevant) in the user's home directory. If you are interested in using the script, put the script file into **/usr/local/bin/** or **~/.local/bin**, an appropriately-named installer (if required) into **~**, and run these commands in your terminal:
 
 ```bash
 chmod 0755 "$(which debchroot)"
-sudo debchroot —help
-sudo debchroot —install
-sudo debchroot —setup
+sudo debchroot —-help
+sudo debchroot —-install
+sudo debchroot -—setup
 ```
 
-After this, simply run **ampl**, **gams**, **stata**, **xstata**, **stata-se**, etc., **texmacs**, and **crossover** (CrossOver has to be run "outside the chroot", therefore please use the provided script). Please not that GAMS Studio and AMPL IDE do not work under chroot, neither does, e.g., [SDMX.jar](https://github.com/amattioc/SDMX) in Stata.
+After this, simply run **ampl**, **gams**, **stata**, **xstata**, **stata-se**, etc., **texmacs**, and **crossover** (CrossOver has to be run "outside the chroot", therefore please use the provided script). Please note that GAMS Studio and AMPL IDE do not work under chroot, neither does, e.g., [SDMX.jar](https://github.com/amattioc/SDMX) in Stata (I found a workaround though).
 
-To avoid typing **sudo debchroot —setup** every session, you can add this line to your user's or root's crontab, replacing \<architecture\>, \<user\> and \<path\> with the required values, e.g., **amd64**, **$(whoami)** (or your username if run under root) and **/usr/local/bin/**:
+To avoid typing **sudo debchroot --setup** every session, you can add this line to your user's or root's crontab, replacing \<architecture\>, \<user\>, and \<path\> with the required values, e.g., **amd64**, **$(whoami)** (or your username if run under root) and **/usr/local/bin/**:
 
 ```bash
-@reboot sleep 60; sudo ARCH=<architecture> CHROOT_USER=<user> <path>/debchroot —setup
+@reboot sleep 60; sudo ARCH=<architecture> CHROOT_USER=<user> <path>/debchroot --setup
 ```
 
 For advanced uses, such as to start a shell (bash) session and to run a command, simply type **sudo debchroot** and **sudo debchroot "cmd"**, for example:
@@ -26,11 +26,11 @@ sudo debchroot "echo hello world"
 sudo debchroot "host 'echo this runs a command under host'"
 ```
 
-**NB** The instructions on how to avoid password in **host** are provided in **sudo chroot —help**.
+**NB** The instructions on how to avoid password in **host** are provided in **sudo chroot --help**.
 
-**PS** A line in crontab, changing the priority (niceness) of selected processes, can significantly increase the speed of QEMU-run chroots, please follow the instructions in **sudo chroot —help** to set it up.
+**PS** A line in crontab, changing the priority (niceness) of selected processes, can significantly increase the speed of QEMU-run chroots, please follow the instructions in **sudo chroot --help** to set it up.
 
-**PS** The **debchroot** script is divided into sections, please add all your custom code into the ones labeled `# <!—- concrete apps —…->` and `# <!—- /concrete apps —…->`.
+**PS** The **debchroot** script is divided into sections, please add all your custom code into the ones labeled `# <!-- concrete apps -…->` and `# <!-- /concrete apps -…->`.
 
 **Requirements:**
 - zsh
@@ -49,14 +49,14 @@ The script is primarily designed to be run on Debian/Ubuntu systems, but you can
 **help for debchroot:**
 
 ```bash
-type /usr/local/bin/debchroot —info    to display the chroot parameters
-type /usr/local/bin/debchroot —install to install the chroot environment
-type /usr/local/bin/debchroot —setup   to set up the chroot environment
-type /usr/local/bin/debchroot —setup+  same + add symlinks in /usr/lib/
-type /usr/local/bin/debchroot —umount  to unmount the chroot environment
-type /usr/local/bin/debchroot —umount+ same + remove the added symlinks
-type /usr/local/bin/debchroot —backup  to backup unsynced folders/files
-type /usr/local/bin/debchroot —restore to restore the chroot environment
+type /usr/local/bin/debchroot --info    to display the chroot parameters
+type /usr/local/bin/debchroot --install to install the chroot environment
+type /usr/local/bin/debchroot --setup   to set up the chroot environment
+type /usr/local/bin/debchroot --setup+  same + add symlinks in /usr/lib/
+type /usr/local/bin/debchroot --umount  to unmount the chroot environment
+type /usr/local/bin/debchroot --umount+ same + remove the added symlinks
+type /usr/local/bin/debchroot --backup  to backup unsynced folders/files
+type /usr/local/bin/debchroot --restore to restore the chroot environment
 type /usr/local/bin/debchroot <cmd>     to run <cmd> under chroot
 
 NB type DISPLAY=:1 CHROOT_USER=root ARCH=i386 SUITE=jessie APTSOURCE=http://archive.debian.org/debian/ /usr/local/bin/debchroot <flag|cmd> to change default parameters
